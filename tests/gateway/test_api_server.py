@@ -12,6 +12,7 @@ Tests cover:
 - Error handling (invalid JSON, missing fields)
 """
 
+import asyncio
 import json
 import time
 import uuid
@@ -228,6 +229,16 @@ def _create_app(adapter: APIServerAdapter) -> web.Application:
     return app
 
 
+def _create_runs_app(adapter: APIServerAdapter) -> web.Application:
+    """Create the aiohttp app with only the structured runs routes."""
+    mws = [mw for mw in (cors_middleware, security_headers_middleware) if mw is not None]
+    app = web.Application(middlewares=mws)
+    app["api_server_adapter"] = adapter
+    app.router.add_post("/v1/runs", adapter._handle_runs)
+    app.router.add_get("/v1/runs/{run_id}/events", adapter._handle_run_events)
+    return app
+
+
 @pytest.fixture
 def adapter():
     return _make_adapter()
@@ -306,6 +317,82 @@ class TestModelsEndpoint:
             data = await resp.json()
             assert data["data"][0]["id"] == "lucas"
             assert data["data"][0]["root"] == "lucas"
+
+
+class TestStructuredRunsSummaryArtifact:
+    @pytest.mark.asyncio
+    async def test_run_completed_includes_optional_summary_artifact(self, adapter):
+        fake_agent = MagicMock()
+        fake_agent.context_compressor = MagicMock()
+        fake_agent.context_compressor.export_summary_artifact.return_value = {
+            "summary_text": "Compacted prior context",
+            "compression_count": 2,
+            "updated_at": "2026-04-20T12:00:00Z",
+            "source": "context_compressor",
+            "format_version": 1,
+        }
+        fake_agent.run_conversation.return_value = {"final_response": "OK"}
+        app = _create_runs_app(adapter)
+
+        async with TestClient(TestServer(app)) as cli:
+            with patch.object(adapter, "_create_agent", return_value=fake_agent):
+                start = await cli.post("/v1/runs", json={"input": "say ok"})
+                assert start.status == 202
+                started = await start.json()
+                run_id = started["run_id"]
+                q = adapter._run_streams[run_id]
+                seen = []
+                while True:
+                    event = await asyncio.wait_for(q.get(), timeout=5)
+                    if event is None:
+                        break
+                    seen.append(event)
+                    if event.get("event") == "run.completed":
+                        completed = event
+                        break
+                else:
+                    completed = None
+
+        assert completed["event"] == "run.completed"
+
+        assert completed["summary_artifact"] == {
+            "summary_text": "Compacted prior context",
+            "compression_count": 2,
+            "updated_at": "2026-04-20T12:00:00Z",
+            "source": "context_compressor",
+            "format_version": 1,
+        }
+
+    @pytest.mark.asyncio
+    async def test_run_completed_omits_summary_artifact_when_unavailable(self, adapter):
+        fake_agent = MagicMock()
+        fake_agent.context_compressor = MagicMock()
+        fake_agent.context_compressor.export_summary_artifact.return_value = None
+        fake_agent.run_conversation.return_value = {"final_response": "OK"}
+        app = _create_runs_app(adapter)
+
+        async with TestClient(TestServer(app)) as cli:
+            with patch.object(adapter, "_create_agent", return_value=fake_agent):
+                start = await cli.post("/v1/runs", json={"input": "say ok"})
+                assert start.status == 202
+                started = await start.json()
+                run_id = started["run_id"]
+                q = adapter._run_streams[run_id]
+                seen = []
+                while True:
+                    event = await asyncio.wait_for(q.get(), timeout=5)
+                    if event is None:
+                        break
+                    seen.append(event)
+                    if event.get("event") == "run.completed":
+                        completed = event
+                        break
+                else:
+                    completed = None
+
+        assert completed["event"] == "run.completed"
+
+        assert "summary_artifact" not in completed
 
     @pytest.mark.asyncio
     async def test_models_returns_explicit_model_name(self):

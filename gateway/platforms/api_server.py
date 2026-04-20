@@ -1517,13 +1517,20 @@ class APIServerAdapter(BasePlatformAdapter):
 
                 result, usage = await asyncio.get_running_loop().run_in_executor(None, _run_sync)
                 final_response = result.get("final_response", "") if isinstance(result, dict) else ""
-                q.put_nowait({
+                completed_event = {
                     "event": "run.completed",
                     "run_id": run_id,
                     "timestamp": time.time(),
                     "output": final_response,
                     "usage": usage,
-                })
+                }
+                compressor = getattr(agent, "context_compressor", None)
+                export_summary_artifact = getattr(compressor, "export_summary_artifact", None)
+                if callable(export_summary_artifact):
+                    artifact = export_summary_artifact()
+                    if artifact is not None:
+                        completed_event["summary_artifact"] = artifact
+                q.put_nowait(completed_event)
             except Exception as exc:
                 logger.exception("[api_server] run %s failed", run_id)
                 try:

@@ -15,6 +15,7 @@ Improvements over v1:
 
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from agent.auxiliary_client import call_llm
@@ -146,6 +147,23 @@ class ContextCompressor:
             "context_length": self.context_length,
             "usage_percent": min(100, (self.last_prompt_tokens / self.context_length * 100)) if self.context_length else 0,
             "compression_count": self.compression_count,
+        }
+
+    def export_summary_artifact(self) -> Optional[Dict[str, Any]]:
+        """Return an opaque continuity artifact for external callers.
+
+        This is intentionally additive and minimal: callers can persist it and
+        feed it back later without depending on compressor internals.
+        """
+        if not self._previous_summary and self.compression_count <= 0:
+            return None
+
+        return {
+            "summary_text": self._previous_summary or "",
+            "compression_count": self.compression_count,
+            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "source": "context_compressor",
+            "format_version": 1,
         }
 
     # ------------------------------------------------------------------
