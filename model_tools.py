@@ -464,6 +464,7 @@ def handle_function_call(
     session_id: Optional[str] = None,
     user_task: Optional[str] = None,
     enabled_tools: Optional[List[str]] = None,
+    request_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Main function call dispatcher that routes calls to the tool registry.
@@ -518,12 +519,14 @@ def handle_function_call(
                 function_name, function_args,
                 task_id=task_id,
                 enabled_tools=sandbox_enabled,
+                request_context=request_context,
             )
         else:
             result = registry.dispatch(
                 function_name, function_args,
                 task_id=task_id,
                 user_task=user_task,
+                request_context=request_context,
             )
 
         try:

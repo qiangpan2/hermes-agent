@@ -321,6 +321,40 @@ class TestModelsEndpoint:
 
 class TestStructuredRunsSummaryArtifact:
     @pytest.mark.asyncio
+    async def test_run_passes_rapid_context_to_agent(self, adapter):
+        fake_agent = MagicMock()
+        fake_agent.context_compressor = MagicMock()
+        fake_agent.context_compressor.export_summary_artifact.return_value = None
+        fake_agent.run_conversation.return_value = {"final_response": "OK"}
+
+        rapid_context = {
+            "internal_caller_token": "token-123",
+        }
+
+        request = MagicMock()
+        request.headers = {}
+
+        async def _json():
+            return {"input": "say ok", "rapid_context": rapid_context}
+
+        request.json = _json
+
+        with patch.object(adapter, "_create_agent", return_value=fake_agent) as mock_create:
+            start = await adapter._handle_runs(request)
+            assert start.status == 202
+            started = json.loads(start.text)
+            run_id = started["run_id"]
+            q = adapter._run_streams[run_id]
+            while True:
+                event = await asyncio.wait_for(q.get(), timeout=5)
+                if event is None:
+                    break
+
+        assert mock_create.call_args.kwargs["request_context"] == {
+            "rapid_context": rapid_context,
+        }
+
+    @pytest.mark.asyncio
     async def test_run_completed_includes_optional_summary_artifact(self, adapter):
         fake_agent = MagicMock()
         fake_agent.context_compressor = MagicMock()

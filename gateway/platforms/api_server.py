@@ -430,6 +430,7 @@ class APIServerAdapter(BasePlatformAdapter):
         session_id: Optional[str] = None,
         stream_delta_callback=None,
         tool_progress_callback=None,
+        request_context: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """
         Create an AIAgent instance using the gateway's runtime config.
@@ -471,6 +472,7 @@ class APIServerAdapter(BasePlatformAdapter):
             session_db=self._ensure_session_db(),
             fallback_model=fallback_model,
         )
+        agent.request_context = request_context or {}
         return agent
 
     # ------------------------------------------------------------------
@@ -802,6 +804,9 @@ class APIServerAdapter(BasePlatformAdapter):
             return web.json_response(_openai_error("Missing 'input' field"), status=400)
 
         instructions = body.get("instructions")
+        rapid_context = body.get("rapid_context")
+        if rapid_context is not None and not isinstance(rapid_context, dict):
+            return web.json_response(_openai_error("'rapid_context' must be an object"), status=400)
         previous_response_id = body.get("previous_response_id")
         conversation = body.get("conversation")
         store = body.get("store", True)
@@ -1448,6 +1453,9 @@ class APIServerAdapter(BasePlatformAdapter):
                 pass
 
         instructions = body.get("instructions")
+        rapid_context = body.get("rapid_context")
+        if rapid_context is not None and not isinstance(rapid_context, dict):
+            return web.json_response(_openai_error("'rapid_context' must be an object"), status=400)
         previous_response_id = body.get("previous_response_id")
 
         # Accept explicit conversation_history from the request body.
@@ -1494,6 +1502,7 @@ class APIServerAdapter(BasePlatformAdapter):
 
         session_id = body.get("session_id") or run_id
         ephemeral_system_prompt = instructions
+        request_context = {"rapid_context": rapid_context} if rapid_context else {}
 
         async def _run_and_close():
             try:
@@ -1502,6 +1511,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     session_id=session_id,
                     stream_delta_callback=_text_cb,
                     tool_progress_callback=event_cb,
+                    request_context=request_context,
                 )
                 def _run_sync():
                     r = agent.run_conversation(
