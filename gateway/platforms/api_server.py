@@ -471,8 +471,8 @@ class APIServerAdapter(BasePlatformAdapter):
             tool_progress_callback=tool_progress_callback,
             session_db=self._ensure_session_db(),
             fallback_model=fallback_model,
+            request_context=request_context or {},
         )
-        agent.request_context = request_context or {}
         return agent
 
     # ------------------------------------------------------------------

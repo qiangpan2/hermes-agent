@@ -74,6 +74,24 @@ from tools.browser_tool import cleanup_browser
 
 from hermes_constants import OPENROUTER_BASE_URL
 
+RAPID_INTERNAL_LLM_PATH = "/api/internal/llm/v1"
+RAPID_INTERNAL_CALLER_TOKEN_HEADER = "X-RAPID-Internal-Caller-Token"
+
+
+def _rapid_internal_caller_token(request_context: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(request_context, dict):
+        return ""
+    rapid_context = request_context.get("rapid_context")
+    if not isinstance(rapid_context, dict):
+        return ""
+    token = rapid_context.get("internal_caller_token")
+    return token.strip() if isinstance(token, str) else ""
+
+
+def _is_rapid_internal_llm_url(base_url: str) -> bool:
+    return RAPID_INTERNAL_LLM_PATH in (base_url or "").lower().rstrip("/")
+
+
 # Agent internals extracted to agent/ package for modularity
 from agent.memory_manager import build_memory_context_block
 from agent.retry_utils import jittered_backoff
@@ -514,6 +532,7 @@ class AIAgent:
         checkpoint_max_snapshots: int = 50,
         pass_session_id: bool = False,
         persist_session: bool = True,
+        request_context: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize the AI Agent.
@@ -577,6 +596,7 @@ class AIAgent:
         self.skip_context_files = skip_context_files
         self.pass_session_id = pass_session_id
         self.persist_session = persist_session
+        self.request_context = request_context or {}
         self._credential_pool = credential_pool
         self.log_prefix_chars = log_prefix_chars
         self.log_prefix = f"{log_prefix} " if log_prefix else ""
@@ -794,6 +814,12 @@ class AIAgent:
                     }
                 elif "portal.qwen.ai" in effective_base.lower():
                     client_kwargs["default_headers"] = _qwen_portal_headers()
+                if _is_rapid_internal_llm_url(effective_base):
+                    caller_token = _rapid_internal_caller_token(self.request_context)
+                    if caller_token:
+                        headers = dict(client_kwargs.get("default_headers") or {})
+                        headers[RAPID_INTERNAL_CALLER_TOKEN_HEADER] = caller_token
+                        client_kwargs["default_headers"] = headers
             else:
                 # No explicit creds — use the centralized provider router
                 from agent.auxiliary_client import resolve_provider_client

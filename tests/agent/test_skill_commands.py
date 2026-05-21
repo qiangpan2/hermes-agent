@@ -46,6 +46,28 @@ class TestScanSkillCommands:
         assert "/my-skill" in result
         assert result["/my-skill"]["name"] == "my-skill"
 
+    def test_finds_rapid_plugin_skill_from_external_dirs(self, tmp_path):
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        local_skills = hermes_home / "skills"
+        local_skills.mkdir()
+        rapid_skills = (
+            Path(__file__).resolve().parents[2] / "RAPID-Plugins" / "skills"
+        )
+        (hermes_home / "config.yaml").write_text(
+            f"skills:\n  external_dirs:\n    - {rapid_skills}\n",
+            encoding="utf-8",
+        )
+
+        with (
+            patch.dict(os.environ, {"HERMES_HOME": str(hermes_home)}),
+            patch("tools.skills_tool.SKILLS_DIR", local_skills),
+        ):
+            result = scan_skill_commands()
+
+        assert "/rapid-booking" in result
+        assert result["/rapid-booking"]["name"] == "rapid-booking"
+
     def test_empty_dir(self, tmp_path):
         with patch("tools.skills_tool.SKILLS_DIR", tmp_path):
             result = scan_skill_commands()
